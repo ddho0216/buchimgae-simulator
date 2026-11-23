@@ -1,3 +1,7 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>오늘 저녁은 전</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -519,7 +523,35 @@ function heart(x, y, s, fill) {
   ctx.restore();
 }
 
-function drawPiece(k, w, way) {
+const FRAG_GRID = { dice: [4, 3], julienne: [11, 1], small: [8, 2], mince: [10, 8], slant: [5, 1], round: [5, 1], ring: [5, 1], chunk: [3, 1] };
+const fragCache = {}, alphaCache = {};
+function alphaOf(k) {
+  if (k in alphaCache) return alphaCache[k];
+  const im = IMG['ing_' + k]; let d = null;
+  try { const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const x = c.getContext('2d'); x.drawImage(im, 0, 0); d = x.getImageData(0, 0, c.width, c.height).data; } catch (e) { d = null; }
+  return (alphaCache[k] = d);
+}
+function frags(k, way) {
+  const key = k + '|' + way; if (fragCache[key]) return fragCache[key];
+  if (!okImg('ing_' + k) || !FRAG_GRID[way]) return null;
+  const im = IMG['ing_' + k], Wd = im.naturalWidth, Hd = im.naturalHeight, [cols, rows] = FRAG_GRID[way], a = alphaOf(k), list = [];
+  for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+    const sx = Math.floor(i * Wd / cols), sy = Math.floor(j * Hd / rows), sw = Math.floor((i + 1) * Wd / cols) - sx, sh = Math.floor((j + 1) * Hd / rows) - sy;
+    let cov = 1;
+    if (a) { let n = 0, t = 0; for (let y = sy; y < sy + sh; y += 3) for (let x = sx; x < sx + sw; x += 3) { t++; if (a[(y * Wd + x) * 4 + 3] > 60) n++; } cov = t ? n / t : 0; }
+    if (cov > 0.22) list.push({ i, j, sx, sy, sw, sh, h: ((i * 73 + j * 151) % 97) / 97 });
+  }
+  return (fragCache[key] = { cols, rows, W: Wd, H: Hd, list });
+}
+/* 조각 하나 그리기: size = 긴 변 길이 */
+function drawFrag(k, way, seed, size) {
+  const f = frags(k, way); if (!f || !f.list.length) return false;
+  const c = f.list[Math.abs(Math.floor(seed * 997)) % f.list.length], sc = size / Math.max(c.sw, c.sh);
+  ctx.drawImage(IMG['ing_' + k], c.sx, c.sy, c.sw, c.sh, -c.sw * sc / 2, -c.sh * sc / 2, c.sw * sc, c.sh * sc);
+  return true;
+}
+function drawPiece(k, w, way, seed) {
+  if (way && drawFrag(k, way, seed === undefined ? Math.random() : seed, w * (way === 'mince' ? 0.75 : way === 'julienne' ? 1.6 : 1.25))) return true;
   const n = 'pc_' + k; if (!okImg(n)) return false;
   const im = IMG[n], h = w * im.naturalHeight / im.naturalWidth, c = CUTS[way];
   if (c) { ctx.save(); ctx.rotate(c.ang); ctx.scale(c.sx, c.sy); ctx.drawImage(im, -w / 2, -h / 2, w, h); ctx.restore(); return true; }
@@ -535,7 +567,7 @@ function drawSpeck(s, R, alpha) {
   const sc = clamp(R / 60, 1, 1.9);
   ctx.save(); ctx.translate(s.x * R, s.y * R); ctx.rotate(s.r); ctx.scale(sc, sc); ctx.globalAlpha *= alpha;
   ctx.shadowColor = 'rgba(40,20,5,0.35)'; ctx.shadowBlur = 2; ctx.shadowOffsetY = 1;
-  if (drawPiece(s.k, PW[s.k], s.way)) { ctx.restore(); return; }
+  if (drawPiece(s.k, PW[s.k], s.way, s.r)) { ctx.restore(); return; }
   switch (s.k) {
     case 'kimchi': ctx.fillStyle = '#b8331f'; ctx.beginPath(); ctx.moveTo(-8, -4); ctx.lineTo(6, -5); ctx.lineTo(9, 3); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill(); ctx.shadowColor = 'transparent'; ctx.fillStyle = '#ecd9ac'; ctx.fillRect(-3, -2, 7, 2.4); ctx.fillStyle = '#d9573a'; ctx.fillRect(-7, -3, 4, 2); break;
     case 'buchu': ctx.shadowColor = 'transparent'; ctx.strokeStyle = '#2f6a22'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-11, 0); ctx.quadraticCurveTo(0, -4, 11, 1); ctx.stroke(); ctx.strokeStyle = '#5da23f'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-10, -0.6); ctx.quadraticCurveTo(0, -4.6, 10, 0.4); ctx.stroke(); break;
@@ -628,6 +660,8 @@ function drawJeonImg(x, y, R, jeon, topV, edgeV, sy, slices) {
   const name = st === 4 ? 'top_' + t : `st_${t}_${st}`;
   if (!okImg(name)) { ctx.restore(); return false; }
   const im = IMG[name];
+  const HAS = { kimchi: ['kimchi'], haemul: ['buchu', 'squid'], buchu: ['buchu'], gamja: ['potato'], hobak: ['zucchini'] }[t] || [];
+  const extra = (jeon.specks || []).filter(sp => !HAS.includes(sp.k) && sp.way).slice(0, 14);
   if (slices) {
     const n = slices, gap = R * 0.035;
     for (let i = 0; i < n; i++) {
@@ -640,6 +674,14 @@ function drawJeonImg(x, y, R, jeon, topV, edgeV, sy, slices) {
   } else {
     ctx.drawImage(im, -R, -R, R * 2, R * 2);
     ctx.strokeStyle = 'rgba(30,20,12,0.85)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, R * 0.965, 0, 6.283); ctx.stroke();
+  }
+  if (extra.length) {
+    ctx.save(); ctx.beginPath(); ctx.arc(0, 0, R * 0.9, 0, 6.283); ctx.clip();
+    ctx.globalAlpha = st === 5 ? 0.35 : st <= 2 ? 0.95 : 0.85;
+    if (st >= 3) ctx.filter = st === 5 ? 'brightness(0.35)' : 'brightness(0.85) sepia(0.25)';
+    extra.forEach(sp => { ctx.save(); ctx.translate(sp.x * R, sp.y * R); ctx.rotate(sp.r); drawPiece(sp.k, R * 0.2, sp.way, sp.r); ctx.restore(); });
+    ctx.filter = 'none';
+    ctx.restore();
   }
   ctx.restore(); return true;
 }
@@ -802,20 +844,35 @@ function drawCut() {
   if (k) {
     const way = S.cutWay[k], c = CUTS[way];
     const f = way ? clamp(S.cuts[k] / needOf(k), 0, 1) : 0;
-    ctx.save(); ctx.globalAlpha = 1 - f * 0.92;
-    drawSprite(k, cx, cy, 250 * (1 - f * 0.35), 170 * (1 - f * 0.45));
-    ctx.restore();
-    S.pile.forEach(q => { ctx.save(); ctx.translate(cx + q.x * 2.1, cy + 22 + q.y * 0.9); ctx.rotate(q.r); ctx.scale(1.35, 1.35); drawPiece(q.k, PW[q.k], q.way); ctx.restore(); });
+    const fr = way && frags(k, way), im = IMG['ing_' + k];
+    let knifeX = cx;
+    if (!fr || !okImg('ing_' + k)) drawSprite(k, cx, cy, 260, 180);
+    else {
+      const sc = Math.min(270 / fr.W, 180 / fr.H), x0 = cx - fr.W * sc / 2, y0 = cy - fr.H * sc / 2;
+      const hold = c.mode === 'hold';
+      const sepCols = hold ? fr.cols * Math.min(1, f * 1.6) : fr.cols * f;
+      fr.list.forEach(q => {
+        const done = hold ? q.h < f : q.i < sepCols;
+        let dx = 0, dy = 0, rot = 0, s2 = 1;
+        if (done) {
+          if (hold) { const a = q.h * 40, rr2 = 40 + 70 * f * q.h; dx = Math.cos(a) * rr2 * 0.9; dy = Math.sin(a) * rr2 * 0.35; rot = (q.h - 0.5) * 3; s2 = 0.9; }
+          else { dx = (q.i - fr.cols / 2 + 0.5) * (way === 'julienne' ? 7 : 12); dy = (q.j - fr.rows / 2 + 0.5) * 10 + (q.h - 0.5) * 8; rot = (q.h - 0.5) * (way === 'julienne' ? 0.5 : 0.35) + (way === 'slant' ? -0.25 : 0); }
+        }
+        const w = q.sw * sc, h = q.sh * sc;
+        ctx.save(); ctx.translate(x0 + (q.sx + q.sw / 2) * sc + dx, y0 + (q.sy + q.sh / 2) * sc + dy); ctx.rotate(rot); ctx.scale(s2, s2);
+        ctx.drawImage(im, q.sx, q.sy, q.sw, q.sh, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      });
+      knifeX = hold ? cx + Math.sin(clock * 40) * 60 : x0 + Math.min(fr.cols - 0.5, sepCols) / fr.cols * fr.W * sc;
+    }
     if (!way) {
       panel(270, 240, 420, 120, false);
       txtO(`${ING[k].n}, 어떻게 썰까?`, 480, 230, 19, '#f6c453', 'center');
       CUT_OF[k].forEach((w, i) => { const b = CUTBTN(i); btn(b.x, b.y, b.w, b.h - 4, false, CUTS[w].n, 18); txt(CUTS[w].tip, b.x + b.w / 2, b.y + 64, 11, '#e9dcc6', 'center', FT); });
     } else {
-      const steps = c.mode === 'hold' ? 8 : c.taps, n = c.mode === 'hold' ? Math.floor(f * 8) : S.cuts[k];
-      const kx = cx - 90 + (Math.min(n, steps - 1) + 0.5) * (180 / steps) + (S.mincing ? rnd(-20, 20) : 0);
       const down = S.chopA < 1 ? Math.sin(S.chopA * Math.PI) : 0;
-      const ky = cy - 128 + down * 84;
-      if (okImg('prop_knife')) { ctx.save(); ctx.translate(kx + 36, ky + 31); ctx.rotate(c.ang * 0.6); ctx.drawImage(IMG.prop_knife, -96, -99, 192, 198); ctx.restore(); }
+      const tipY = cy - 70 + down * 100;
+      if (okImg('prop_knife')) { const kh = 250, kw = kh * IMG.prop_knife.naturalWidth / IMG.prop_knife.naturalHeight; ctx.save(); ctx.translate(knifeX, tipY); ctx.rotate(Math.PI + 0.18 + c.ang * 0.5); ctx.drawImage(IMG.prop_knife, -kw / 2, 0, kw, kh); ctx.restore(); }
       txtO(c.mode === 'hold' ? '도마를 꾹 누르고 있기 (다지기)' : `도마를 톡톡 (${c.n})`, cx, 262, 18, '#f6c453', 'center');
       if (c.mode === 'hold') { ctx.fillStyle = OL; rr(cx - 101, 276, 202, 14, 7); ctx.fill(); ctx.fillStyle = '#e8a83a'; rr(cx - 98, 279, 196 * f, 8, 4); ctx.fill(); }
     }
@@ -828,7 +885,7 @@ function drawCut() {
   ctx.save(); ctx.beginPath(); ctx.ellipse(B.x, B.y, B.rx, B.ry, 0, 0, 6.283); ctx.clip();
   S.picks.forEach((kk, i) => {
     if (!S.cutWay[kk] || S.cuts[kk] < needOf(kk) || i >= S.cutIdx) return;
-    for (let j = 0; j < 9; j++) { const a = j * 0.9 + i * 1.7, d = 0.25 + ((j * 37 + i * 11) % 10) / 16; ctx.save(); ctx.translate(B.x + Math.cos(a) * d * 64, B.y + Math.sin(a) * d * 18); ctx.rotate(a * 2); drawPiece(kk, PW[kk], S.cutWay[kk]); ctx.restore(); }
+    for (let j = 0; j < 9; j++) { const a = j * 0.9 + i * 1.7, d = 0.25 + ((j * 37 + i * 11) % 10) / 16; ctx.save(); ctx.translate(B.x + Math.cos(a) * d * 64, B.y + Math.sin(a) * d * 18); ctx.rotate(a * 2); drawPiece(kk, PW[kk], S.cutWay[kk], j * 0.37 + i); ctx.restore(); }
   });
   ctx.restore();
   txtO('손질한 재료', B.x, B.y + 92, 15, '#f4ecdc', 'center');
@@ -1052,7 +1109,7 @@ function drawServe() {
   drawJeon(450, 380, 128, S.jeon, S.pan.sides[0], S.pan.sides[1], 0.5, S.cut ? 6 : 0);
   drawDipBowl(DIPS[S.dip], 612, 430, 1.3);
   if (DIPS[S.dip].soy) prop('prop_soy', 700, 380, 50, 120);
-  if (S.cut) prop('prop_knife', 262, 450, 100, 104, 0.3);
+  if (S.cut) prop('prop_knife', 262, 440, 46, 220, 0.5);
   ctx.font = `22px ${FS}`; const nw = ctx.measureText(shownName()).width + 40;
   ctx.fillStyle = 'rgba(40,37,35,0.9)'; rr(470 - nw / 2, 296, nw, 36, 18); ctx.fill(); ctx.strokeStyle = OL; ctx.lineWidth = 2.5; ctx.stroke();
   txt(shownName(), 470, 322, 22, '#f1e7d3', 'center', FS);
@@ -1425,3 +1482,5 @@ requestAnimationFrame(frame);
 window.__jeon = { get state() { return { phase, stage, S }; } };
 })();
 </script>
+
+</html>
